@@ -1892,7 +1892,8 @@ local function stealable()
     local now = os.clock()
     if now - _lastFallbackScan < 2 then return out end
     _lastFallbackScan = now
-  
+      return out
+end
 local function isNight()
     local n = ReplicatedStorage:FindFirstChild("Night")
     return n and n.Value == true
