@@ -2303,7 +2303,7 @@ end)
 -- back-to-back (no hold). Server-side steal is proximity-gated like the prompt, so
 -- teleport to the fruit unless disabled.
 local function hrpNow() local c = LocalPlayer.Character; return c and c:FindFirstChild("HumanoidRootPart") end
-loopOn(function() return S.autoSteal end, 1.5, function()
+loopOn(function() return S.autoSteal end, 0.05, function()
    
     for _, f in ipairs(stealable()) do
         if not (S.autoSteal and isNight()) then break end
@@ -2311,8 +2311,15 @@ loopOn(function() return S.autoSteal end, 1.5, function()
         if S.stealTeleport and f.pos then
             local hrp = hrpNow(); if hrp then pcall(function() hrp.CFrame = CFrame.new(f.pos + Vector3.new(0, 4, 0)) end); task.wait(0.4) end
         end
+       local hrp = hrpNow()
+local dist = (hrp and f.pos) and (hrp.Position - f.pos).Magnitude or 999
+if dist < 15 then
+    for _ = 1, 5 do
         fire("Steal.BeginSteal", f.owner, f.plantId, f.fruitId)
         fire("Steal.CompleteSteal")
+        task.wait(0.05)
+    end
+end
         Stats.stolen += 1
         -- 2) carry it home: standing in own garden zone banks it (CarryingStolenFruit clears)
        
