@@ -1,6 +1,6 @@
 -- =============================================
--- Simplified WalkyHub - AUTO STEAL ONLY
--- One toggle UI + spam every second (day & night)
+-- SIMPLIFIED AUTO STEAL ONLY (Fixed)
+-- Spams the real Steal.BeginSteal + CompleteSteal
 -- =============================================
 
 local Players = game:GetService("Players")
@@ -8,29 +8,65 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local CollectionService = game:GetService("CollectionService")
 
 local LocalPlayer = Players.LocalPlayer
 
--- ================== STEAL LOGIC ==================
+-- ================== NETWORKING (Core from original) ==================
+local Net
+do
+    local sm = ReplicatedStorage:WaitForChild("SharedModules", 8)
+    local mod = sm and sm:FindFirstChild("Networking")
+    if mod then
+        local ok, m = pcall(require, mod)
+        if ok then Net = m end
+    end
+end
 
+if not Net then
+    warn("[StealHub] Networking module not found!")
+    return
+end
+
+local function action(path)
+    local cur = Net
+    for part in string.gmatch(path, "[^.]+") do
+        if type(cur) ~= "table" then return nil end
+        cur = cur[part]
+    end
+    return cur
+end
+
+local function fire(path, ...)
+    local a = action(path)
+    if not (a and a.Fire) then 
+        warn("[Steal] No action:", path)
+        return false 
+    end
+    local args = table.pack(...)
+    local ok = pcall(function()
+        a:Fire(table.unpack(args, 1, args.n))
+    end)
+    return ok
+end
+
+-- ================== STEAL CORE ==================
 local function hrpNow()
     local char = LocalPlayer.Character
     return char and char:FindFirstChild("HumanoidRootPart")
 end
 
 local function myBasePos()
-    local plot = nil
     local id = LocalPlayer:GetAttribute("PlotId")
-    if id then
-        local gardens = Workspace:FindFirstChild("Gardens")
-        plot = gardens and gardens:FindFirstChild("Plot" .. tostring(id))
-    end
-    if plot then
-        for _, tag in ipairs({"GardenTotalArea", "GardenZone"}) do
-            for _, p in ipairs(CollectionService:GetTagged(tag)) do
-                if p:IsDescendantOf(plot) then
-                    return p.Position - Vector3.new(0, p.Size.Y/2 - 5, 0)
-                end
+    if not id then return nil end
+    local gardens = Workspace:FindFirstChild("Gardens")
+    local plot = gardens and gardens:FindFirstChild("Plot" .. tostring(id))
+    if not plot then return nil end
+
+    for _, tag in ipairs({"GardenTotalArea", "GardenZone"}) do
+        for _, p in ipairs(CollectionService:GetTagged(tag)) do
+            if p:IsA("BasePart") and p:IsDescendantOf(plot) then
+                return p.Position - Vector3.new(0, p.Size.Y/2 - 5, 0)
             end
         end
     end
@@ -39,30 +75,26 @@ end
 
 local function promptCarrier(prompt)
     local node = prompt.Parent
-    while node and node ~= Workspace and not node:GetAttribute("PlantId") do
+    while node and node ~= Workspace do
+        if node:GetAttribute("PlantId") then return node end
         node = node.Parent
     end
-    return node and node:GetAttribute("PlantId") and node or prompt:FindFirstAncestorWhichIsA("Model")
+    return prompt:FindFirstAncestorWhichIsA("Model")
 end
 
-local function stealable()
+local function getStealable()
     local out = {}
     for _, pr in ipairs(CollectionService:GetTagged("StealPrompt")) do
         if pr:IsA("ProximityPrompt") and pr.Enabled then
-            local m = promptCarrier(pr)
-            if m and m:GetAttribute("PlantId") then
+            local carrier = promptCarrier(pr)
+            if carrier and carrier:GetAttribute("PlantId") then
                 local pos = nil
-                local pp = pr.Parent
-                if pp and pp:IsA("BasePart") then
-                    pos = pp.Position
-                else
-                    pcall(function() pos = m:GetPivot().Position end)
-                end
+                pcall(function() pos = carrier:GetPivot().Position end)
                 table.insert(out, {
-                    owner = tonumber(m:GetAttribute("UserId")) or 0,
-                    plantId = tostring(m:GetAttribute("PlantId")),
-                    fruitId = tostring(m:GetAttribute("FruitId") or ""),
-                    pos = pos,
+                    owner = tonumber(carrier:GetAttribute("UserId")) or 0,
+                    plantId = tostring(carrier:GetAttribute("PlantId")),
+                    fruitId = tostring(carrier:GetAttribute("FruitId") or ""),
+                    pos = pos
                 })
             end
         end
@@ -70,127 +102,116 @@ local function stealable()
     return out
 end
 
-local function doSteal()
-    for _, f in ipairs(stealable()) do
-        -- Teleport to fruit
+local function performSteal()
+    for _, fruit in ipairs(getStealable()) do
+        -- Teleport close to fruit (server checks proximity)
         local hrp = hrpNow()
-        if hrp and f.pos then
+        if hrp and fruit.pos then
             pcall(function()
-                hrp.CFrame = CFrame.new(f.pos + Vector3.new(0, 4, 0))
+                hrp.CFrame = CFrame.new(fruit.pos + Vector3.new(0, 5, 0))
             end)
-            task.wait(0.35)
+            task.wait(0.4)
         end
 
-        -- Steal
-        pcall(function() 
-            ReplicatedStorage:WaitForChild("Networking", 5):FindFirstChild("Steal", 5):FindFirstChild("BeginSteal"):Fire(f.owner, f.plantId, f.fruitId)
-            ReplicatedStorage:WaitForChild("Networking", 5):FindFirstChild("Steal", 5):FindFirstChild("CompleteSteal"):Fire()
-        end)
+        -- ACTUAL STEAL (this is what triggers the in-game steal button logic)
+        fire("Steal.BeginSteal", fruit.owner, fruit.plantId, fruit.fruitId)
+        fire("Steal.CompleteSteal")
 
-        -- Return to base to bank
+        -- Return to base to bank the stolen fruit
         hrp = hrpNow()
         local base = myBasePos()
         if hrp and base then
             pcall(function()
-                hrp.CFrame = CFrame.new(base + Vector3.new(0, 4, 0))
+                hrp.CFrame = CFrame.new(base + Vector3.new(0, 5, 0))
             end)
         end
 
-        task.wait(0.8) -- spam control
+        task.wait(0.75) -- Adjust if needed
     end
 end
 
 -- ================== MINIMAL UI ==================
-
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "SimpleStealHub"
+ScreenGui.Name = "StealOnlyHub"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.Parent = LocalPlayer.PlayerGui
 
-local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 220, 0, 120)
-Frame.Position = UDim2.new(0.5, -110, 0.3, 0)
-Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-Frame.BorderSizePixel = 0
-Frame.Parent = ScreenGui
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, 240, 0, 140)
+Main.Position = UDim2.new(0.5, -120, 0.4, 0)
+Main.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+Main.BorderSizePixel = 0
+Main.Parent = ScreenGui
 
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 12)
-UICorner.Parent = Frame
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 14)
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 40)
+Title.Size = UDim2.new(1, 0, 0, 45)
 Title.BackgroundTransparency = 1
-Title.Text = "Auto Steal"
-Title.TextColor3 = Color3.fromRGB(255, 100, 100)
-Title.TextSize = 18
+Title.Text = "AUTO STEAL"
+Title.TextColor3 = Color3.fromRGB(255, 90, 90)
+Title.TextSize = 20
 Title.Font = Enum.Font.GothamBold
-Title.Parent = Frame
+Title.Parent = Main
 
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(0.85, 0, 0, 50)
-ToggleButton.Position = UDim2.new(0.075, 0, 0.45, 0)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-ToggleButton.Text = "OFF"
-ToggleButton.TextColor3 = Color3.fromRGB(255, 80, 80)
-ToggleButton.TextSize = 16
-ToggleButton.Font = Enum.Font.GothamSemibold
-ToggleButton.Parent = Frame
+local Toggle = Instance.new("TextButton")
+Toggle.Size = UDim2.new(0.8, 0, 0, 55)
+Toggle.Position = UDim2.new(0.1, 0, 0.45, 0)
+Toggle.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+Toggle.Text = "OFF"
+Toggle.TextColor3 = Color3.fromRGB(255, 100, 100)
+Toggle.TextSize = 18
+Toggle.Font = Enum.Font.GothamSemibold
+Toggle.Parent = Main
 
-local UICorner2 = Instance.new("UICorner")
-UICorner2.CornerRadius = UDim.new(0, 10)
-UICorner2.Parent = ToggleButton
+Instance.new("UICorner", Toggle).CornerRadius = UDim.new(0, 12)
 
 -- Draggable
-local dragging, dragInput, dragStart, startPos
-Frame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+local dragging = false
+Main.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 then
         dragging = true
-        dragStart = input.Position
-        startPos = Frame.Position
-    end
-end)
+        local startPos = Main.Position
+        local startMouse = inp.Position
 
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local delta = input.Position - dragStart
-        Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
+        local conn
+        conn = UserInputService.InputChanged:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
+                local delta = input.Position - startMouse
+                Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
+        end)
 
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
+        UserInputService.InputEnded:Connect(function() 
+            dragging = false
+            conn:Disconnect()
+        end)
     end
 end)
 
 -- Toggle Logic
-local autoStealEnabled = false
-local stealConnection = nil
+local enabled = false
+local loopConn = nil
 
-ToggleButton.MouseButton1Click:Connect(function()
-    autoStealEnabled = not autoStealEnabled
-    
-    if autoStealEnabled then
-        ToggleButton.Text = "ON"
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(80, 180, 80)
-        ToggleButton.TextColor3 = Color3.new(1,1,1)
-        
-        stealConnection = RunService.Heartbeat:Connect(function()
-            if autoStealEnabled then
-                pcall(doSteal)
+Toggle.MouseButton1Click:Connect(function()
+    enabled = not enabled
+
+    if enabled then
+        Toggle.Text = "ON"
+        Toggle.BackgroundColor3 = Color3.fromRGB(70, 180, 90)
+        Toggle.TextColor3 = Color3.new(1,1,1)
+
+        loopConn = RunService.Heartbeat:Connect(function()
+            if enabled then
+                pcall(performSteal)
             end
         end)
     else
-        ToggleButton.Text = "OFF"
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-        ToggleButton.TextColor3 = Color3.fromRGB(255, 80, 80)
-        
-        if stealConnection then
-            stealConnection:Disconnect()
-            stealConnection = nil
-        end
+        Toggle.Text = "OFF"
+        Toggle.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+        Toggle.TextColor3 = Color3.fromRGB(255, 100, 100)
+        if loopConn then loopConn:Disconnect() end
     end
 end)
 
-print("✅ Simplified Auto-Steal loaded | Toggle with the button")
+print("✅ Auto Steal Hub Loaded - Click ON to spam steal every second")
