@@ -2315,15 +2315,7 @@ loopOn(function() return S.autoSteal end, 1.5, function()
         fire("Steal.CompleteSteal")
         Stats.stolen += 1
         -- 2) carry it home: standing in own garden zone banks it (CarryingStolenFruit clears)
-        if S.stealReturnBase then
-            local base = myBasePos()
-            local hrp = hrpNow()
-            if base and hrp then
-                pcall(function() hrp.CFrame = CFrame.new(base + Vector3.new(0, 4, 0)) end)
-                local t0 = os.clock()
-                while LocalPlayer:GetAttribute("CarryingStolenFruit") and os.clock() - t0 < 3 and S.autoSteal do task.wait(0.15) end
-            end
-        end
+       
         if (S.stealDelay or 0) > 0 then task.wait(S.stealDelay) end
     end
 end)
@@ -2539,7 +2531,13 @@ secShop:Slider("Gear buy interval (s)", 10, 2, 60, function(v) S.gearInterval = 
 local secSteal = stealTab:Section("Auto-Steal (night only)")
 secSteal:Toggle("Auto-Steal others' ripe fruit", false, function(v) S.autoSteal = v end)
 secSteal:Toggle("Teleport to fruit (needed to steal)", true, function(v) S.stealTeleport = v end)
-secSteal:Toggle("Return to base after each fruit (banks it)", true, function(v) S.stealReturnBase = v end)
+secSteal:Button("Teleport to my base now", function()
+    local base = myBasePos()
+    local hrp = hrpNow()
+    if base and hrp then
+        pcall(function() hrp.CFrame = CFrame.new(base + Vector3.new(0, 4, 0)) end)
+    end
+end)
 secSteal:Slider("Steal speed (delay/fruit, 0=instant)", 1, 0, 60, function(v) S.stealDelay = v end)
 local secStealInfo = stealTab:Section("Info")
 secStealInfo:Label("Night-only · TP to fruit, steal,")
