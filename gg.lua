@@ -1868,7 +1868,7 @@ local function ripeHarvests()       -- own ripe fruit (tag "HarvestPrompt")
     end
     return out
 end
-local function stealable()          -- other players' ripe fruit (tag "StealPrompt")
+local function stealable()
     local out = {}
     for _, pr in ipairs(CollectionService:GetTagged("StealPrompt")) do
         if pr:IsA("ProximityPrompt") and pr.Enabled and pr:IsDescendantOf(Workspace) then
@@ -1888,8 +1888,34 @@ local function stealable()          -- other players' ripe fruit (tag "StealProm
             end
         end
     end
+    -- fallback: scan nearby prompts during day
+    local hrp = hrpNow()
+    if hrp then
+        for _, pr in ipairs(Workspace:GetDescendants()) do
+            if pr:IsA("ProximityPrompt") and pr.Enabled and pr.ActionText and
+               string.find(string.lower(pr.ActionText), "steal") then
+                local part = pr.Parent
+                if part and part:IsA("BasePart") then
+                    local dist = (hrp.Position - part.Position).Magnitude
+                    if dist < 20 then
+                        local m = promptCarrier(pr)
+                        local pid = m and m:GetAttribute("PlantId")
+                        if pid then
+                            out[#out+1] = {
+                                owner = tonumber(m:GetAttribute("UserId")) or 0,
+                                plantId = tostring(pid),
+                                fruitId = tostring(m:GetAttribute("FruitId") or ""),
+                                pos = part.Position,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
     return out
 end
+   
 local function isNight()
     local n = ReplicatedStorage:FindFirstChild("Night")
     return n and n.Value == true
