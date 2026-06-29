@@ -1965,7 +1965,7 @@ local S = {
     -- shop
     autoGear = false, gearBuy = {}, gearInterval = 10,
     -- steal
-    autoSteal = false, stealTeleport = true, stealReturnBase = true, stealDelay = 0.05,
+    autoSteal = false, stealTeleport = true, stealReturnBase = true, stealDelay = 2.05,
     -- misc
     autoMail = false, autoAcceptGift = false, autoHop = false, hopInterval = 0,
     codeText = "", autoCodes = false, antiAfk = true,
