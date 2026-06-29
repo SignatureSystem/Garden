@@ -2535,7 +2535,10 @@ secSteal:Button("Teleport to my base now", function()
     local base = myBasePos()
     local hrp = hrpNow()
     if base and hrp then
-        pcall(function() hrp.CFrame = CFrame.new(base + Vector3.new(0, 4, 0)) end)
+        for i = 1, 5 do
+            pcall(function() hrp.CFrame = CFrame.new(base + Vector3.new(0, 4, 0)) end)
+            task.wait(0.1)
+        end
     end
 end)
 secSteal:Slider("Steal speed (delay/fruit, 0=instant)", 1, 0, 60, function(v) S.stealDelay = v end)
