@@ -1,6 +1,5 @@
 -- =============================================
--- SIMPLIFIED AUTO STEAL ONLY (Fixed)
--- Spams the real Steal.BeginSteal + CompleteSteal
+-- AUTO STEAL ONLY v3 - More Aggressive + Debug
 -- =============================================
 
 local Players = game:GetService("Players")
@@ -12,206 +11,162 @@ local CollectionService = game:GetService("CollectionService")
 
 local LocalPlayer = Players.LocalPlayer
 
--- ================== NETWORKING (Core from original) ==================
+-- Networking
 local Net
 do
-    local sm = ReplicatedStorage:WaitForChild("SharedModules", 8)
+    local sm = ReplicatedStorage:WaitForChild("SharedModules", 10)
     local mod = sm and sm:FindFirstChild("Networking")
     if mod then
-        local ok, m = pcall(require, mod)
-        if ok then Net = m end
+        local success, module = pcall(require, mod)
+        if success then Net = module end
     end
 end
 
 if not Net then
-    warn("[StealHub] Networking module not found!")
+    warn("❌ Networking module not found!")
     return
 end
 
-local function action(path)
-    local cur = Net
-    for part in string.gmatch(path, "[^.]+") do
-        if type(cur) ~= "table" then return nil end
-        cur = cur[part]
-    end
-    return cur
-end
-
 local function fire(path, ...)
-    local a = action(path)
-    if not (a and a.Fire) then 
-        warn("[Steal] No action:", path)
-        return false 
+    local cur = Net
+    for segment in string.gmatch(path, "[^.]+") do
+        cur = cur[segment]
+        if not cur then return false end
     end
-    local args = table.pack(...)
-    local ok = pcall(function()
-        a:Fire(table.unpack(args, 1, args.n))
-    end)
-    return ok
-end
-
--- ================== STEAL CORE ==================
-local function hrpNow()
-    local char = LocalPlayer.Character
-    return char and char:FindFirstChild("HumanoidRootPart")
-end
-
-local function myBasePos()
-    local id = LocalPlayer:GetAttribute("PlotId")
-    if not id then return nil end
-    local gardens = Workspace:FindFirstChild("Gardens")
-    local plot = gardens and gardens:FindFirstChild("Plot" .. tostring(id))
-    if not plot then return nil end
-
-    for _, tag in ipairs({"GardenTotalArea", "GardenZone"}) do
-        for _, p in ipairs(CollectionService:GetTagged(tag)) do
-            if p:IsA("BasePart") and p:IsDescendantOf(plot) then
-                return p.Position - Vector3.new(0, p.Size.Y/2 - 5, 0)
-            end
-        end
+    if cur and cur.Fire then
+        local success, err = pcall(function(...)
+            cur:Fire(...)
+        end, ...)
+        if not success then warn("Fire failed:", path, err) end
+        return success
     end
-    return nil
+    return false
 end
 
-local function promptCarrier(prompt)
-    local node = prompt.Parent
-    while node and node ~= Workspace do
-        if node:GetAttribute("PlantId") then return node end
-        node = node.Parent
-    end
-    return prompt:FindFirstAncestorWhichIsA("Model")
-end
-
+-- Get stealable fruits
 local function getStealable()
-    local out = {}
-    for _, pr in ipairs(CollectionService:GetTagged("StealPrompt")) do
-        if pr:IsA("ProximityPrompt") and pr.Enabled then
-            local carrier = promptCarrier(pr)
-            if carrier and carrier:GetAttribute("PlantId") then
-                local pos = nil
-                pcall(function() pos = carrier:GetPivot().Position end)
-                table.insert(out, {
-                    owner = tonumber(carrier:GetAttribute("UserId")) or 0,
-                    plantId = tostring(carrier:GetAttribute("PlantId")),
-                    fruitId = tostring(carrier:GetAttribute("FruitId") or ""),
-                    pos = pos
+    local fruits = {}
+    for _, prompt in ipairs(CollectionService:GetTagged("StealPrompt")) do
+        if prompt:IsA("ProximityPrompt") and prompt.Enabled then
+            local model = prompt:FindFirstAncestorWhichIsA("Model") or prompt.Parent
+            while model and not model:GetAttribute("PlantId") do
+                model = model.Parent
+            end
+            if model and model:GetAttribute("PlantId") then
+                local pos = model:GetPivot().Position
+                table.insert(fruits, {
+                    owner = tonumber(model:GetAttribute("UserId")) or 0,
+                    plantId = tostring(model:GetAttribute("PlantId")),
+                    fruitId = tostring(model:GetAttribute("FruitId") or ""),
+                    pos = pos,
+                    prompt = prompt
                 })
             end
         end
     end
-    return out
+    return fruits
 end
 
-local function performSteal()
-    for _, fruit in ipairs(getStealable()) do
-        -- Teleport close to fruit (server checks proximity)
-        local hrp = hrpNow()
-        if hrp and fruit.pos then
-            pcall(function()
-                hrp.CFrame = CFrame.new(fruit.pos + Vector3.new(0, 5, 0))
-            end)
-            task.wait(0.4)
+local function stealOne(fruit)
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- Teleport very close
+    pcall(function()
+        hrp.CFrame = CFrame.new(fruit.pos + Vector3.new(0, 4, 0))
+    end)
+    task.wait(0.3)
+
+    -- Fire steal
+    local s1 = fire("Steal.BeginSteal", fruit.owner, fruit.plantId, fruit.fruitId)
+    local s2 = fire("Steal.CompleteSteal")
+
+    print("🔥 Steal attempt:", s1 and s2 and "SUCCESS" or "FAILED", fruit.plantId)
+
+    -- Return to base
+    local base = nil
+    local plotId = LocalPlayer:GetAttribute("PlotId")
+    if plotId then
+        local plot = Workspace.Gardens and Workspace.Gardens:FindFirstChild("Plot"..plotId)
+        if plot then
+            for _, p in ipairs(CollectionService:GetTagged("GardenZone")) do
+                if p:IsDescendantOf(plot) then base = p.Position end
+            end
         end
+    end
 
-        -- ACTUAL STEAL (this is what triggers the in-game steal button logic)
-        fire("Steal.BeginSteal", fruit.owner, fruit.plantId, fruit.fruitId)
-        fire("Steal.CompleteSteal")
-
-        -- Return to base to bank the stolen fruit
-        hrp = hrpNow()
-        local base = myBasePos()
-        if hrp and base then
-            pcall(function()
-                hrp.CFrame = CFrame.new(base + Vector3.new(0, 5, 0))
-            end)
-        end
-
-        task.wait(0.75) -- Adjust if needed
+    if base and hrp then
+        pcall(function()
+            hrp.CFrame = CFrame.new(base + Vector3.new(0, 5, 0))
+        end)
     end
 end
 
--- ================== MINIMAL UI ==================
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "StealOnlyHub"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = LocalPlayer.PlayerGui
+-- ================== UI ==================
+local sg = Instance.new("ScreenGui", LocalPlayer.PlayerGui)
+sg.Name = "StealHub"
 
-local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 240, 0, 140)
-Main.Position = UDim2.new(0.5, -120, 0.4, 0)
-Main.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
-Main.BorderSizePixel = 0
-Main.Parent = ScreenGui
+local frame = Instance.new("Frame", sg)
+frame.Size = UDim2.new(0, 260, 0, 160)
+frame.Position = UDim2.new(0.5, -130, 0.35, 0)
+frame.BackgroundColor3 = Color3.fromRGB(15, 15, 22)
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 16)
 
-Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 14)
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1,0,0,50)
+title.BackgroundTransparency = 1
+title.Text = "AUTO STEAL"
+title.TextColor3 = Color3.fromRGB(255, 85, 85)
+title.TextSize = 22
+title.Font = Enum.Font.GothamBold
 
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 45)
-Title.BackgroundTransparency = 1
-Title.Text = "AUTO STEAL"
-Title.TextColor3 = Color3.fromRGB(255, 90, 90)
-Title.TextSize = 20
-Title.Font = Enum.Font.GothamBold
-Title.Parent = Main
-
-local Toggle = Instance.new("TextButton")
-Toggle.Size = UDim2.new(0.8, 0, 0, 55)
-Toggle.Position = UDim2.new(0.1, 0, 0.45, 0)
-Toggle.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-Toggle.Text = "OFF"
-Toggle.TextColor3 = Color3.fromRGB(255, 100, 100)
-Toggle.TextSize = 18
-Toggle.Font = Enum.Font.GothamSemibold
-Toggle.Parent = Main
-
-Instance.new("UICorner", Toggle).CornerRadius = UDim.new(0, 12)
+local btn = Instance.new("TextButton", frame)
+btn.Size = UDim2.new(0.8,0,0,60)
+btn.Position = UDim2.new(0.1,0,0.45,0)
+btn.BackgroundColor3 = Color3.fromRGB(50,50,60)
+btn.Text = "OFF"
+btn.TextColor3 = Color3.fromRGB(255,100,100)
+btn.TextSize = 20
+btn.Font = Enum.Font.GothamBold
+Instance.new("UICorner", btn).CornerRadius = UDim.new(0,12)
 
 -- Draggable
-local dragging = false
-Main.InputBegan:Connect(function(inp)
-    if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        local startPos = Main.Position
-        local startMouse = inp.Position
-
-        local conn
-        conn = UserInputService.InputChanged:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
-                local delta = input.Position - startMouse
-                Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+frame.InputBegan:Connect(function(i) 
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then
+        local start = frame.Position
+        local mouseStart = i.Position
+        local conn = UserInputService.InputChanged:Connect(function(m)
+            if m.UserInputType == Enum.UserInputType.MouseMovement then
+                local delta = m.Position - mouseStart
+                frame.Position = UDim2.new(start.X.Scale, start.X.Offset + delta.X, start.Y.Scale, start.Y.Offset + delta.Y)
             end
         end)
-
-        UserInputService.InputEnded:Connect(function() 
-            dragging = false
-            conn:Disconnect()
-        end)
+        UserInputService.InputEnded:Connect(function() conn:Disconnect() end)
     end
 end)
 
--- Toggle Logic
-local enabled = false
-local loopConn = nil
+-- Toggle
+local running = false
+local connection
 
-Toggle.MouseButton1Click:Connect(function()
-    enabled = not enabled
-
-    if enabled then
-        Toggle.Text = "ON"
-        Toggle.BackgroundColor3 = Color3.fromRGB(70, 180, 90)
-        Toggle.TextColor3 = Color3.new(1,1,1)
-
-        loopConn = RunService.Heartbeat:Connect(function()
-            if enabled then
-                pcall(performSteal)
+btn.MouseButton1Click:Connect(function()
+    running = not running
+    if running then
+        btn.Text = "ON - SPAMMING"
+        btn.BackgroundColor3 = Color3.fromRGB(80, 200, 100)
+        connection = RunService.Heartbeat:Connect(function()
+            if running then
+                for _, fruit in ipairs(getStealable()) do
+                    pcall(stealOne, fruit)
+                    task.wait(0.6)
+                end
             end
         end)
     else
-        Toggle.Text = "OFF"
-        Toggle.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-        Toggle.TextColor3 = Color3.fromRGB(255, 100, 100)
-        if loopConn then loopConn:Disconnect() end
+        btn.Text = "OFF"
+        btn.BackgroundColor3 = Color3.fromRGB(50,50,60)
+        if connection then connection:Disconnect() end
     end
 end)
 
-print("✅ Auto Steal Hub Loaded - Click ON to spam steal every second")
+print("🚀 Steal Hub v3 Loaded - Turn ON and stand near stealable fruits")
