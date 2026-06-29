@@ -2304,7 +2304,7 @@ end)
 -- teleport to the fruit unless disabled.
 local function hrpNow() local c = LocalPlayer.Character; return c and c:FindFirstChild("HumanoidRootPart") end
 loopOn(function() return S.autoSteal end, 1.5, function()
-    if not isNight() then return end
+   
     for _, f in ipairs(stealable()) do
         if not (S.autoSteal and isNight()) then break end
         -- 1) go to the fruit (proximity is server-gated) and steal it
